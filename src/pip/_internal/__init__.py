@@ -29,8 +29,8 @@ try:
 except ImportError:
     pass
 else:
-    if (sys.platform == "darwin" and
-            ssl.OPENSSL_VERSION_NUMBER < 0x1000100f):  # OpenSSL 1.0.1
+    # Checks for OpenSSL 1.0.1 on MacOS
+    if sys.platform == "darwin" and ssl.OPENSSL_VERSION_NUMBER < 0x1000100f:
         try:
             from pip._vendor.urllib3.contrib import securetransport
         except (ImportError, OSError):
@@ -105,33 +105,100 @@ def autocomplete():
                 sys.exit(1)
 
         subcommand = commands_dict[subcommand_name]()
-        options += [(opt.get_opt_string(), opt.nargs)
-                    for opt in subcommand.parser.option_list_all
-                    if opt.help != optparse.SUPPRESS_HELP]
+
+        for opt in subcommand.parser.option_list_all:
+            if opt.help != optparse.SUPPRESS_HELP:
+                for opt_str in opt._long_opts + opt._short_opts:
+                    options.append((opt_str, opt.nargs))
 
         # filter out previously specified options from available options
         prev_opts = [x.split('=')[0] for x in cwords[1:cword - 1]]
         options = [(x, v) for (x, v) in options if x not in prev_opts]
         # filter options by current input
         options = [(k, v) for k, v in options if k.startswith(current)]
+        # get completion type given cwords and available subcommand options
+        completion_type = get_path_completion_type(
+            cwords, cword, subcommand.parser.option_list_all,
+        )
+        # get completion files and directories if ``completion_type`` is
+        # ``<file>``, ``<dir>`` or ``<path>``
+        if completion_type:
+            options = auto_complete_paths(current, completion_type)
+            options = ((opt, 0) for opt in options)
         for option in options:
             opt_label = option[0]
             # append '=' to options which require args
-            if option[1]:
+            if option[1] and option[0][:2] == "--":
                 opt_label += '='
             print(opt_label)
     else:
         # show main parser options only when necessary
-        if current.startswith('-') or current.startswith('--'):
-            opts = [i.option_list for i in parser.option_groups]
-            opts.append(parser.option_list)
-            opts = (o for it in opts for o in it)
 
-            subcommands += [i.get_opt_string() for i in opts
-                            if i.help != optparse.SUPPRESS_HELP]
+        opts = [i.option_list for i in parser.option_groups]
+        opts.append(parser.option_list)
+        opts = (o for it in opts for o in it)
+        if current.startswith('-'):
+            for opt in opts:
+                if opt.help != optparse.SUPPRESS_HELP:
+                    subcommands += opt._long_opts + opt._short_opts
+        else:
+            # get completion type given cwords and all available options
+            completion_type = get_path_completion_type(cwords, cword, opts)
+            if completion_type:
+                subcommands = auto_complete_paths(current, completion_type)
 
         print(' '.join([x for x in subcommands if x.startswith(current)]))
     sys.exit(1)
+
+
+def get_path_completion_type(cwords, cword, opts):
+    """Get the type of path completion (``file``, ``dir``, ``path`` or None)
+
+    :param cwords: same as the environmental variable ``COMP_WORDS``
+    :param cword: same as the environmental variable ``COMP_CWORD``
+    :param opts: The available options to check
+    :return: path completion type (``file``, ``dir``, ``path`` or None)
+    """
+    if cword < 2 or not cwords[cword - 2].startswith('-'):
+        return
+    for opt in opts:
+        if opt.help == optparse.SUPPRESS_HELP:
+            continue
+        for o in str(opt).split('/'):
+            if cwords[cword - 2].split('=')[0] == o:
+                if any(x in ('path', 'file', 'dir')
+                        for x in opt.metavar.split('/')):
+                    return opt.metavar
+
+
+def auto_complete_paths(current, completion_type):
+    """If ``completion_type`` is ``file`` or ``path``, list all regular files
+    and directories starting with ``current``; otherwise only list directories
+    starting with ``current``.
+
+    :param current: The word to be completed
+    :param completion_type: path completion type(`file`, `path` or `dir`)i
+    :return: A generator of regular files and/or directories
+    """
+    directory, filename = os.path.split(current)
+    current_path = os.path.abspath(directory)
+    # Don't complete paths if they can't be accessed
+    if not os.access(current_path, os.R_OK):
+        return
+    filename = os.path.normcase(filename)
+    # list all files that start with ``filename``
+    file_list = (x for x in os.listdir(current_path)
+                 if os.path.normcase(x).startswith(filename))
+    for f in file_list:
+        opt = os.path.join(current_path, f)
+        comp_file = os.path.normcase(os.path.join(directory, f))
+        # complete regular files when there is not ``<dir>`` after option
+        # complete directories when there is ``<file>``, ``<path>`` or
+        # ``<dir>``after option
+        if completion_type != 'dir' and os.path.isfile(opt):
+            yield comp_file
+        elif os.path.isdir(opt):
+            yield os.path.join(comp_file, '')
 
 
 def create_main_parser():
@@ -148,7 +215,8 @@ def create_main_parser():
 
     pip_pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     parser.version = 'pip %s from %s (python %s)' % (
-        __version__, pip_pkg_dir, sys.version[:3])
+        __version__, pip_pkg_dir, sys.version[:3],
+    )
 
     # add the general options
     gen_opts = cmdoptions.make_option_group(cmdoptions.general_group, parser)
@@ -206,15 +274,6 @@ def parseopts(args):
     return cmd_name, cmd_args
 
 
-def check_isolated(args):
-    isolated = False
-
-    if "--isolated" in args:
-        isolated = True
-
-    return isolated
-
-
 def main(args=None):
     if args is None:
         args = sys.argv[1:]
@@ -238,5 +297,5 @@ def main(args=None):
     except locale.Error as e:
         # setlocale can apparently crash if locale are uninitialized
         logger.debug("Ignoring error %s when setting locale", e)
-    command = commands_dict[cmd_name](isolated=check_isolated(cmd_args))
+    command = commands_dict[cmd_name](isolated=("--isolated" in cmd_args))
     return command.main(cmd_args)

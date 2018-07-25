@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 import logging
 import os
-from email.parser import FeedParser
+from email.parser import FeedParser  # type: ignore
 
 from pip._vendor import pkg_resources
 from pip._vendor.packaging.utils import canonicalize_name
@@ -14,7 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 class ShowCommand(Command):
-    """Show information about one or more installed packages."""
+    """
+    Show information about one or more installed packages.
+
+    The output is in RFC-compliant mail header format.
+    """
     name = 'show'
     usage = """
       %prog [options] <package> ..."""

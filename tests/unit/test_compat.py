@@ -5,7 +5,7 @@ import pytest
 
 import pip._internal.compat
 from pip._internal.compat import (
-    console_to_str, expanduser, get_path_uid, native_str
+    console_to_str, expanduser, get_path_uid, native_str,
 )
 
 
@@ -59,7 +59,7 @@ def test_console_to_str(monkeypatch):
 def test_console_to_str_warning(monkeypatch):
     some_bytes = b"a\xE9b"
 
-    def check_warning(msg):
+    def check_warning(msg, *args, **kwargs):
         assert msg.startswith(
             "Subprocess output does not appear to be encoded as")
 
@@ -78,7 +78,7 @@ def test_to_native_str_type():
 @pytest.mark.parametrize("home,path,expanded", [
     ("/Users/test", "~", "/Users/test"),
     ("/Users/test", "~/.cache", "/Users/test/.cache"),
-    # Verify that we are not affected by http://bugs.python.org/issue14768
+    # Verify that we are not affected by https://bugs.python.org/issue14768
     ("/", "~", "/"),
     ("/", "~/.cache", "/.cache"),
 ])
